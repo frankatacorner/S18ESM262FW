@@ -1,0 +1,166 @@
+---
+title: "S18_ESM262_HW1_FrankWang"
+author: "Frank Wang"
+date: "5/2/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import and Tidy
+
+**Question 1.** Read the gazetteer data as-is (all columns; no type conversion) into a `gaz_raw` _tibble_.
+
+**Answer** Import the tidyverse library in case it is not available on the current device by using the `library("tidyverse")` command in R.
+
+```{r tidyverse, echo=TRUE}
+library("tidyverse")
+```
+
+Set the working directory to where data is available.
+```{r directory, echo=TRUE}
+setwd("~/OneDrive/MA Year 4/S18_ESM262")
+```
+
+Import the gazetteer data into RStudio.
+```{r Q1. raw import, echo=TRUE}
+gaz_raw <- read_delim("CA_Features_20180401.txt", delim = "|", col_names = T)
+```
+
+**Question 2.** Copy only the following columns into a `gaz` tibble (you can rename them if you like): feature ID/feature name/feature class/state alpha/county name/primary latitude (decimal)/primary longitude (decimal)/source latitude (decimal)/source longitude (decimal)/elevation in meters/map name/date created/date edited.
+
+**Answer** Use the `select` function and pick out desired columns.
+```{r Q2. select columns, echo=TRUE}
+gaz <- gaz_raw %>%
+  select(starts_with("feature", ignore.case = T), 
+         STATE_ALPHA, 
+         COUNTY_NAME,
+         ends_with("DEC", ignore.case = F),
+         ELEV_IN_M,
+         MAP_NAME,
+         starts_with("date", ignore.case = T))
+```
+
+**Question 3.** Convert the `gaz` columns to the appropriate type. Convert any placeholders for unknown data to `NA`.
+
+**Answer** 
+Convert any entry with "Unknown" to `NA`.
+```{r Q3. eliminate unkowns, echo=TRUE}
+gaz[gaz == "Unknown"] <- NA
+```
+Create two new columns for "date created" and "date edited" information, and attach them to the `gaz` tibble with `mutate` function after selecting the columns from `gaz` that have the appropriate types.
+```{r Q3. column type, echo=TRUE}
+date_created <- parse_date(gaz$DATE_CREATED, format = "%m/%d/%Y")
+date_edited <- parse_date(gaz$DATE_EDITED, format = "%m/%d/%Y")
+gaz <- gaz %>%
+  select(starts_with("feature", ignore.case = T), 
+         STATE_ALPHA, 
+         COUNTY_NAME,
+         ends_with("DEC", ignore.case = F),
+         ELEV_IN_M,
+         MAP_NAME) %>%
+  mutate(.,
+         date_created,
+         date_edited)
+```
+
+**Question 4.** Delete from `gaz` rows where:
+* the **primary** latitude or longitude are unknown
+* the feature is not in California
+
+**Answer** Use the `filter` function to select rows that record features in California `filter(gaz, STATE_ALPHA == "CA")`, and pipe the results into another filter to make sure there is no missing value in primary latitude or primary longitude, then pipe the results again to remove primary coordinates that contain zero. Notice that !x & !y is the same as !(x | y).
+```{r delete rows}
+gaz <- filter(gaz, STATE_ALPHA == "CA") %>% 
+  filter(., !is.na(PRIM_LAT_DEC) & !is.na(PRIM_LONG_DEC)) %>%
+  filter(!(PRIM_LAT_DEC == 0 | PRIM_LONG_DEC == 0))
+```
+
+**Question 5.** Write the `gaz` tibble to a CSV file (using `"|"` as a delimiter).
+
+**Answer** Use the `write_delim` function to set the deliminator as "|", which `write_csv` is not able to do. Specify the type of file, csv, in the file path instead.
+```{r write out csv}
+write_delim(gaz, "CA_features_20180401_clean.csv", delim = "|", na = "NA", append = F)
+```
+
+***
+## Analyze
+
+Create R code snippets that answer the following questions about California:
+
+**Question 1.** What is the most-frequently-occurring _feature_ name?
+
+**Answer** Group the data set by its feature name using the `group_by` function, then count the occurrence of each feature name, sorted from the largest to the smallest.
+```{r sort feature name}
+feature_name <- group_by(gaz, FEATURE_NAME)
+feat_name_count <- tally(feature_name, sort = T)
+head(feat_name_count, n = 1)
+```
+The most-frequently-occurring feature name is `r head(feat_name_count, n = 1)`
+
+**Question 2.** What is the least-frequently-occurring feature class?
+
+**Answer** Group the data set by its feature class using the `group_by` function, then count the occurrence of each feature class, sorted from the largest to the smallest.
+
+```{r sort feature class}
+feature_class <- group_by(gaz, FEATURE_CLASS)
+feat_class_count <- tally(feature_class, sort = T) 
+```
+
+The bottom five rows of the feature_count tibble is displayed, essentially showing us the least-frequently-occurring feature classes.
+
+```{r check tail of feature class, echo=TRUE}
+tail(feat_class_count, n = 5)
+```
+As there are two feature classes that appear only once, we can add a `filter` to pick them out.
+```{r choose tail of feature class, echo=TRUE}
+tail(feat_class_count, n = 5) %>%
+  filter(n == 1)
+```
+The least-frequently-occurring feature classes are _Isthmus_ and _Sea_. (*Note: the "occurring" in the current version of the assignment has a missing letter "r".*)
+
+**Question 3.** What is the approximate center point of each county?
+* Hint: Calculate the center of the bounding box of the county’s **point** features.
+
+**Answer** Group the gazetteer data by county name and calculate the mean coordinates of each county.
+The approximate center point of some county is listed below (latitude & longitude).
+```{r county centers, echo=TRUE}
+county_name <- group_by(gaz, COUNTY_NAME)
+summarise(county_name, 
+          mean_lat = mean(PRIM_LAT_DEC), 
+          mean_lon = mean(PRIM_LONG_DEC))
+```
+
+**Question 4.** What are the fractions of the total number of features in each county that are natural? man-made?
+* Hint: Construct a tibble with two columns, one containing all possible feature classes (see “[Feature Class Definitions](https://geonames.usgs.gov/apex/f?p=gnispq:8:0:::::)”), and another containing the string “natural” or “man-made”, which you assign (it’s pretty obvious.) Then join this tibble to the gazetteer tibble.
+
+**Answer** The "[Feature Class Definitions](https://geonames.usgs.gov/apex/f?p=gnispq:8:0:::::)" has been downloaded as "Class_Code_Definitions.csv" in the working directory. Manually classify the 65 classes by using a vector of characters and create a `class_and_type` tibble by selecting the class names and class types.
+```{r import class code as a tibble}
+n <- "natural"
+a <- "man-made"
+class_type <- c(a, n, n, n, n, n, n, n, n, n,
+                a, a, a, n, n, a, a, n, a, a,
+                n, n, a, a, n, n, n, n, n, n,
+                a, a, n, n, n, n, a, a, a, a,
+                a, a, n, n, a, a, n, n, a, a,
+                n, a, n, n, n, n, n, n, a, a,
+                a, n, n, a, n)
+class_code <- read_delim("Class_Code_Definitions.csv", delim = ",", col_names = T)
+class_and_type <- select(class_code, Class) %>%
+  mutate(Class, class_type)
+```
+
+Now this `class_and_type` tibble can be used to join with the gazetteer tibble, after which the data is grouped by class type to allow for counting of their occurrences.
+```{r}
+left_join(gaz, class_and_type, by = c("FEATURE_CLASS" = "Class")) %>%
+  group_by(class_type) %>%
+  tally()
+```
+The tally shows that there are 82240 man-made features and 38982 natural features, which translates to `r 82240/(82240+38982)` fraction of man-made features and `r 38982/(82240+38982)` fraction of natural features.
+
+**Concluding remarks** I adore this assignment greatly. I don't have much experience with programming and this is the first time I wrote codes in R (and in R Markdown) that allowed me to see the potential of its application. If time allows, could you address the following two questions in class?  
+1. Convert the `gaz` columns to the appropriate type. Convert any placeholders for unknown data to `NA`.  
+2. For the most/least frequently occurring features, is there a way to further pipe the results from `tally`, instead of having to wait and see the numbers?  
+3. Somehow when I tried to use `summarise` on some grouped data, the program would not return the counts. I decided to use `tally` after consulting the help menu, but wonder if there is some trick to make `summarise` work.  
+**Thank you!**
