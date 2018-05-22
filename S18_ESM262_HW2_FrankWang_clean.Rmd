@@ -1,0 +1,158 @@
+---
+title: "S18 ESM 262 Assignment 2 Database"
+author: "Frank Wang"
+date: "5/15/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(DBI)
+library(dplyr)
+library(dbplyr)
+library("tidyverse")
+```
+
+## Create database
+
+**Replace** step 5 (“Write the `gaz` tibble to a CSV file …”) with:  
+1. Create a connection to a new `gaz.db` SQLite database.  
+2. Copy the `gaz` tibble into the `gaz.db` database.
+
+**Answer 1** Install the dbplyr package in case it is not available on the current device by using the `install.packages("dbplyr")` command in R.
+``` {r Import dbplyr, echo=TRUE}
+# install.packages("dbplyr")
+```
+
+Load the library `dbplyr` and establish a connection to a new `gaz.db` SQLite databse.
+``` {r Databse connection, echo=TRUE, collapse = TRUE}
+gaz_db <- DBI::dbConnect(RSQLite::SQLite(), path = ":memory:")
+```
+
+**Answer 2** Create a `gaz` tibble by importing the cleaned csv file from the previous assignment using the `read_delim` function from tidyverse. Alternatively, re-run the codes from the previous assignment to re-create the gaz tibble.
+``` {r Create gaz tibble, echo=TRUE}
+gaz <- read_delim("../S18_ESM262_HW1/CA_features_20180401_clean.csv",delim = "|", col_names = T)
+```
+
+Copy the `gaz` tibble into the `gaz.db` database by using the `copy_to()` function.
+
+```{r Copy to gaz.db, echo=TRUE}
+copy_to(gaz_db, gaz, "gaz", overwrite = TRUE)
+```
+
+## Analyze
+
+Using SQL queries and the dbGetQuery function, create R code snippets that answer the following questions about California:
+
+1. What is the most-frequently-occuring feature name?  
+Use the `dbGetQuery` function to send query in SQL and assign the result into a variable called `gaz_feat_name`. The query asks SQLite to select the feature name based on the occurrence of features from our gaz database in a descending order.
+```{r Most feature}
+gaz_feat_name <- dbGetQuery(gaz_db, 
+"SELECT FEATURE_NAME AS 'Most frequently occuring feature', COUNT(FEATURE_NAME) AS Occurrence
+FROM gaz
+GROUP BY FEATURE_NAME
+ORDER BY COUNT(FEATURE_NAME) DESC
+LIMIT 1;")
+```
+**Answer 1:** The most frequently occuring feature was **`r gaz_feat_name[,1]`**.
+
+2. What is the least-frequently-occuring feature class?  
+Use the `dbGetQuery` function to send query in SQL and assign the result into a variable called `gaz_class_name`. The query asks SQLite to select the feature class based on the occurrence of classes from our gaz database in an ascending order.
+```{r Least class} 
+gaz_class_name <- dbGetQuery(gaz_db,
+"SELECT FEATURE_CLASS AS 'Least frequently occuring class'
+FROM gaz
+GROUP BY FEATURE_CLASS
+ORDER BY COUNT(FEATURE_CLASS) ASC
+LIMIT 5;" )
+```
+**Answer 2:** The least frequently occuring feature class was **`r gaz_class_name[1,]`**.
+
+3. What is the approximate center point of each county?  
+Calculate the center of the bounding box of the county’s **point** features by finding the minima and the maxima of the latitudes and longitudes of the point features in each county.
+```{r county coordinates, echo=TRUE, warning=FALSE}
+# This chunk was produced during experimenting with SQL syntax and can display the minimum and maximum latitude and longitude of each county, but the display is not needed for calculating the county centers
+county_coor <- dbGetQuery(gaz_db,
+"SELECT 
+  COUNTY_NAME AS 'County', 
+  min(PRIM_LAT_DEC) AS 'County latitude minima', 
+  max(PRIM_LAT_DEC) AS 'County latitude maxima',
+  min(PRIM_LONG_DEC) AS 'County longitude minima',
+  max(PRIM_LONG_DEC) AS 'County longitude maxima'
+FROM gaz
+WHERE COUNTY_NAME IS NOT NULL
+GROUP BY COUNTY_NAME
+ORDER BY COUNTY_NAME ASC")
+```
+
+```{r county centers, echo=TRUE}
+county_center <- dbGetQuery(gaz_db,
+"SELECT 
+  COUNTY_NAME AS 'County', 
+  round((min(PRIM_LAT_DEC)+max(PRIM_LAT_DEC))/2, 5) AS 'County Center Lat',
+  round((min(PRIM_LONG_DEC)+max(PRIM_LONG_DEC))/2, 5) AS 'County Center Lon'
+FROM gaz
+WHERE COUNTY_NAME IS NOT NULL
+GROUP BY COUNTY_NAME
+ORDER BY COUNTY_NAME ASC")
+```
+**Answer 3:** The coordinates of the approximate center point of each county are displayed in the table below.
+``` {r}
+county_center
+```
+
+4. What are the fractions of the total number of features in each county that are natural? man-made?
+  + Hint: Copy the feature class categories tibble you created into the gaz.db database. Then you can JOIN it to the the gaz table.
+```{r}
+class_code <- read_delim("../S18_ESM262_HW1/Class_Code_Definitions.csv", delim = ",", col_names = T)
+n <- "natural"
+a <- "man-made"
+class_type <- c(a, n, n, n, n, n, n, n, n, n,
+                a, a, a, n, n, a, a, n, a, a,
+                n, n, a, a, n, n, n, n, n, n,
+                a, a, n, n, n, n, a, a, a, a,
+                a, a, n, n, a, a, n, n, a, a,
+                n, a, n, n, n, n, n, n, a, a,
+                a, n, n, a, n)
+class_and_type <- select(class_code, Class) %>%
+  mutate(Class, class_type)
+
+dbWriteTable(gaz_db, name = "Class_Info", class_and_type, overwrite = T, row.names = NULL, temporary = FALSE)
+
+Natural_by_county <- dbGetQuery(gaz_db, 
+"SELECT 
+  COUNTY_NAME AS County, 
+  count(class_type) AS Natural_Feature_Tally
+FROM gaz
+JOIN Class_Info
+ON gaz.FEATURE_CLASS = Class_Info.Class
+WHERE Class_Type = 'natural' AND COUNTY_NAME IS NOT NULL
+GROUP BY COUNTY_NAME
+ORDER BY COUNTY_NAME ASC;")
+
+Manmade_by_county <- dbGetQuery(gaz_db, 
+"SELECT 
+  COUNTY_NAME AS County, 
+  count(class_type) AS ManMade_Feature_Tally
+FROM gaz
+JOIN Class_Info
+ON gaz.FEATURE_CLASS = Class_Info.Class
+WHERE Class_Type = 'man-made' AND COUNTY_NAME IS NOT NULL
+GROUP BY COUNTY_NAME
+ORDER BY COUNTY_NAME ASC;")
+
+Feature_by_county <- left_join(as_tibble(Natural_by_county), as_tibble(Manmade_by_county), by = c("County" = "County"))
+
+Natural_Feat_Fraction <- round(Feature_by_county$Natural_Feature_Tally/(Feature_by_county$Natural_Feature_Tally+Feature_by_county$ManMade_Feature_Tally)*100, 1)
+Manmade_Feat_Fraction <- round(Feature_by_county$ManMade_Feature_Tally/(Feature_by_county$Natural_Feature_Tally+Feature_by_county$ManMade_Feature_Tally)*100, 1)
+
+Feature_by_county <- add_column(Feature_by_county, Natural_Feat_Fraction, Manmade_Feat_Fraction)
+
+Feature_by_county
+```
+
+**Answer 4:** The fractions of the total number of features in each county that are natural vs. man-made are summarized above.
