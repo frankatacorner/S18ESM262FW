@@ -1,0 +1,63 @@
+---
+title: "ESM262_HW3_FW"
+author: "Frank Wang"
+date: "6/6/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r install required packages}
+#install.packages("roxygen2")
+#install.packages("devtools")
+library(roxygen2)
+library(devtools)
+library(ggplot2)
+```
+## Generate Data for the Fish Market Function
+
+``` {r}
+# create a list of possible fish to sample from
+possible_fish = c("anchovy","eel","halibut","mackerel","trout","tuna")
+
+# generate typical prices for each possible fish
+prices = data.frame(fish=possible_fish, price=c(20,30,10,25,18,20))
+
+locs = c("California","Washington","Hokkaido","Baha","Peru")
+
+# Create an empty data frame with proper dimensions to hold fish catch data to be generated
+example_catch = matrix(nrow=length(possible_fish), ncol=length(locs))
+colnames(example_catch)=locs
+rownames(example_catch)=possible_fish
+
+# Simulate different productivities or typical size of catch at each locale
+locs = data.frame(name=locs, size = c(2000,2000,5000,4000,7000))
+
+# and different relative population size for fish
+for ( i in 1:length(possible_fish)) {
+  for (j in 1:nrow(locs)) {
+      example_catch[i,j] =  round(rnorm(mean=locs$size[j], sd=0.15*locs$size[j], n=1))
+  }
+}
+  
+# run function
+# fisheries_summary(catches=example_catch, prices=prices, plot=FALSE)
+
+# try with a plot
+fisheries_summary(catches=example_catch, prices=prices, plot=TRUE)
+```
+
+## Fish Growth Rate vs. Temperature
+```{r}
+library(tidyverse)
+input_para <- read_csv("Table2.csv", col_names = T)
+  a = input_para$a
+  b = input_para$b
+  c = input_para$c
+  d = input_para$d
+fish_growth(20)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
